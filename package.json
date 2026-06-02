@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "opencode-live",
+  "version": "0.1.0",
+  "description": "Local realtime chat sync for opencode runtimes.",
+  "keywords": [
+    "chat",
+    "opencode",
+    "realtime",
+    "sync"
+  ],
+  "homepage": "https://github.com/eersnington/opencode-live#readme",
+  "license": "MIT",
+  "author": "Eersnington",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eersnington/opencode-live.git"
+  },
+  "bin": {
+    "opencode-live": "./dist/src/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "type": "module",
+  "main": "./dist/src/cli.js",
+  "exports": {
+    ".": {
+      "import": "./dist/src/cli.js",
+      "types": "./dist/src/cli.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "effect:check": "effect-language-service check",
+    "effect:diagnostics": "effect-language-service diagnostics --project tsconfig.json",
+    "effect:patch": "effect-language-service patch",
+    "effect:unpatch": "effect-language-service unpatch",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "4.0.0-beta.66",
+    "@opencode-ai/plugin": "1.15.4",
+    "effect": "4.0.0-beta.66",
+    "xdg-basedir": "5.1.0"
+  },
+  "devDependencies": {
+    "@effect/language-service": "0.85.1",
+    "@types/bun": "1.3.14",
+    "oxfmt": "0.52.0",
+    "oxlint": "1.67.0",
+    "typescript": "6.0.3"
+  },
+  "peerDependencies": {
+    "@opentui/core": ">=0.2.14",
+    "@opentui/keymap": ">=0.2.14",
+    "@opentui/solid": ">=0.2.14"
+  },
+  "peerDependenciesMeta": {
+    "@opentui/core": {
+      "optional": true
+    },
+    "@opentui/keymap": {
+      "optional": true
+    },
+    "@opentui/solid": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "opencode": ">=1.15.0"
+  }
+}
