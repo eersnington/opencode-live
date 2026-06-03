@@ -47,6 +47,10 @@ const ProbeEventShape = Schema.Struct({
 });
 const ModuleNamespaceShape = Schema.Record(Schema.String, Schema.Unknown);
 
+function sleep(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
+
 export const captureGlobalBus = Effect.fn("captureGlobalBus")(function* (
   input: CaptureInput,
 ) {
@@ -192,7 +196,7 @@ const waitForEventEmitterSubscription = Effect.fn(
     const result = yield* Effect.promise(() =>
       Promise.race([
         read.then((value) => ({ type: "event" as const, value })),
-        Bun.sleep(0).then(() => ({ type: "pending" as const })),
+        sleep(0).then(() => ({ type: "pending" as const })),
       ]),
     );
 
@@ -205,10 +209,9 @@ const waitForEventEmitterSubscription = Effect.fn(
     }
 
     input.pendingReads.push(read);
-    const waitDeadline = Math.min(deadline, performance.now() + 25);
 
-    while (input.candidates.length === 0 && performance.now() < waitDeadline) {
-      yield* Effect.promise(() => Bun.sleep(1));
+    while (input.candidates.length === 0 && performance.now() < deadline) {
+      yield* Effect.promise(() => sleep(1));
     }
     return;
   }
@@ -261,7 +264,7 @@ const readNextBefore = Effect.fn("readNextBefore")(function* (input: {
   const result = yield* Effect.tryPromise(() =>
     Promise.race([
       read.then((value) => ({ type: "event" as const, value })),
-      Bun.sleep(input.timeoutMillis).then(() => ({ type: "timeout" as const })),
+      sleep(input.timeoutMillis).then(() => ({ type: "timeout" as const })),
     ]),
   ).pipe(Effect.option);
 

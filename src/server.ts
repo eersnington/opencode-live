@@ -8,8 +8,8 @@ import { opencodeDataDir, resolveOpencodeDbPath } from "./opencode-db.js";
 import { connectIpc, socketPath } from "./ipc.js";
 import { daemonRegistryFile, readDaemonRegistry } from "./daemon-registry.js";
 import {
+  AllowedEventTypeSchema,
   DbHashSchema,
-  isRelayableEvent,
   ProcessIDSchema,
   type DbHash,
   type ServerMessage,
@@ -59,19 +59,24 @@ const makeServerHooks = Effect.fn("makeServerHooks")(function* (
   options?: Options,
 ) {
   const dataDir = options?.dataDir ?? opencodeDataDir();
+
   const resolvedDbPath = yield* resolveOpencodeDbPath({
     dbPath: options?.dbPath,
     dataDir,
   });
+
   const hash = Schema.decodeUnknownSync(DbHashSchema)(
     createHash("md5").update(path.resolve(resolvedDbPath)).digest("hex"),
   );
+
   const processID = Schema.decodeUnknownSync(ProcessIDSchema)(
     `${process.pid}-${randomUUID()}`,
   );
+
   const debug = options?.debug
     ? (message: string) => console.error(`[opencode-live] ${message}`)
     : undefined;
+
   const refresh = yield* makeRefresh({ client: ctx.client, debug });
 
   if (options?.debug) {
@@ -111,7 +116,9 @@ const makeServerHooks = Effect.fn("makeServerHooks")(function* (
 
   return {
     event(input: PluginEventInput) {
-      if (!isRelayableEvent(input.event)) {
+      const eventType = input.event.type;
+
+      if (!Schema.is(AllowedEventTypeSchema)(eventType)) {
         return Promise.resolve();
       }
 
@@ -120,7 +127,11 @@ const makeServerHooks = Effect.fn("makeServerHooks")(function* (
         originProcessID: processID,
         directory: ctx.directory,
         projectID: ctx.project.id,
-        event: input.event,
+        event: {
+          id: input.event.id,
+          type: eventType,
+          properties: input.event.properties,
+        },
       });
 
       return Promise.resolve();
@@ -210,7 +221,12 @@ const startDaemon = Effect.fn("startDaemon")(function* (
   yield* Effect.try({
     try: () => {
       const bun =
-        input.options?.bunPath ?? Bun.which("bun") ?? process.execPath;
+        input.options?.bunPath ??
+        (typeof Bun === "undefined"
+          ? process.env.BUN_INSTALL
+            ? path.join(process.env.BUN_INSTALL, "bin", "bun")
+            : "bun"
+          : (Bun.which("bun") ?? process.execPath));
       const daemonPath = path.join(import.meta.dirname, "daemon.js");
       const daemonArgs = [
         daemonPath,

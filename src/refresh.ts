@@ -69,15 +69,12 @@ export const makeRefresh = Effect.fn("makeRefresh")(function* (input: {
 
   input.debug?.("no GlobalBus capture path validated");
 
-  const workerRpc = readWorkerRpc();
-
-  if (workerRpc) {
-    return workerRpcRefresh(workerRpc);
+  if ("postMessage" in globalThis) {
+    return workerRpcRefresh((message) => globalThis.postMessage(message));
   }
 
-  input.debug?.(`postMessage type: ${typeof globalThis.postMessage}`);
+  input.debug?.("postMessage is unavailable");
   input.debug?.(`process.execPath: ${process.execPath}`);
-  input.debug?.(`Bun.main: ${String(Bun.main)}`);
   input.debug?.(`process.argv: ${process.argv.slice(0, 3).join(" | ")}`);
 
   return noneRefresh;
@@ -134,15 +131,3 @@ const noneRefresh: Refresh = {
     return Effect.void;
   },
 };
-
-function readWorkerRpc() {
-  const postMessage = globalThis.postMessage;
-
-  if (typeof postMessage !== "function") {
-    return undefined;
-  }
-
-  return (message: string) => {
-    postMessage.call(globalThis, message);
-  };
-}

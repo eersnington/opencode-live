@@ -10,7 +10,7 @@ export const ProcessIDSchema = Schema.String.check(Schema.isNonEmpty()).pipe(
 );
 export type ProcessID = Schema.Schema.Type<typeof ProcessIDSchema>;
 
-const AllowedEventTypeSchema = Schema.Literals([
+export const AllowedEventTypeSchema = Schema.Literals([
   "session.updated",
   "session.deleted",
   "message.updated",
@@ -150,12 +150,4 @@ export function decodeServerMessageLine(
       message: `Invalid server IPC message: ${decoded.failure}`,
     }),
   );
-}
-
-export function isRelayableEvent(input: {
-  id?: string;
-  type: string;
-  properties: unknown;
-}): input is LiveEvent {
-  return Schema.is(AllowedEventTypeSchema)(input.type);
 }
