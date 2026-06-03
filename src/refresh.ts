@@ -21,14 +21,20 @@ export type Refresh = {
   publish(input: RelayEventMessage): Effect.Effect<void>;
 };
 
+type CaptureGlobalBusInput = {
+  client: unknown;
+  serverUrl?: URL;
+  debug?: CaptureDebug;
+};
+
 export const makeRefresh = Effect.fn("makeRefresh")(function* (input: {
   client: unknown;
+  serverUrl?: URL;
   debug?: CaptureDebug;
   importGlobalBus?: () => Promise<unknown>;
-  captureGlobalBus?: (input: {
-    client: unknown;
-    debug?: CaptureDebug;
-  }) => Promise<GlobalBusLike | undefined>;
+  captureGlobalBus?: (
+    input: CaptureGlobalBusInput,
+  ) => Promise<GlobalBusLike | undefined>;
 }) {
   const globalBusModule = "opencode/bus/global";
   const importStarted = performance.now();
@@ -61,11 +67,16 @@ export const makeRefresh = Effect.fn("makeRefresh")(function* (input: {
           try: () =>
             capture({
               client: input.client,
+              serverUrl: input.serverUrl,
               debug: input.debug,
             }),
           catch: (cause) => new RefreshProbeFailed({ cause }),
         })
-      : captureGlobalBus({ client: input.client, debug: input.debug })
+      : captureGlobalBus({
+          client: input.client,
+          serverUrl: input.serverUrl,
+          debug: input.debug,
+        })
   ).pipe(Effect.option);
   input.debug?.(
     `refresh capture probe: ${Math.round(performance.now() - captureStarted)}ms`,
