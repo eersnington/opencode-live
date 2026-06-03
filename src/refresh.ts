@@ -31,11 +31,15 @@ export const makeRefresh = Effect.fn("makeRefresh")(function* (input: {
   }) => Promise<GlobalBusLike | undefined>;
 }) {
   const globalBusModule = "opencode/bus/global";
+  const importStarted = performance.now();
   const imported = yield* Effect.tryPromise({
     try: () =>
       input.importGlobalBus ? input.importGlobalBus() : import(globalBusModule),
     catch: (cause) => new RefreshProbeFailed({ cause }),
   }).pipe(Effect.option);
+  input.debug?.(
+    `refresh import probe: ${Math.round(performance.now() - importStarted)}ms`,
+  );
 
   if (imported._tag === "None") {
     input.debug?.("private GlobalBus import failed");
@@ -50,6 +54,7 @@ export const makeRefresh = Effect.fn("makeRefresh")(function* (input: {
   }
 
   const capture = input.captureGlobalBus;
+  const captureStarted = performance.now();
   const captured = yield* (
     capture
       ? Effect.tryPromise({
@@ -62,6 +67,9 @@ export const makeRefresh = Effect.fn("makeRefresh")(function* (input: {
         })
       : captureGlobalBus({ client: input.client, debug: input.debug })
   ).pipe(Effect.option);
+  input.debug?.(
+    `refresh capture probe: ${Math.round(performance.now() - captureStarted)}ms`,
+  );
 
   if (captured._tag === "Some" && captured.value) {
     return globalBusRefresh("global-bus-capture", captured.value);

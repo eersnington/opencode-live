@@ -68,9 +68,13 @@ export const captureGlobalBus = Effect.fn("captureGlobalBus")(function* (
   let stream: AsyncIterator<unknown> | undefined;
 
   return yield* Effect.gen(function* () {
+    const openStarted = performance.now();
     const opened = yield* Effect.tryPromise(() =>
       openGlobalEventStream(controller.signal),
     ).pipe(Effect.option);
+    input.debug?.(
+      `capture stream open: ${Math.round(performance.now() - openStarted)}ms`,
+    );
 
     if (Option.isNone(opened) || !opened.value) {
       input.debug?.("ctx.client.global.event returned an invalid stream");
@@ -78,24 +82,32 @@ export const captureGlobalBus = Effect.fn("captureGlobalBus")(function* (
     }
 
     stream = opened.value;
+    const subscriptionStarted = performance.now();
     yield* waitForEventEmitterSubscription({
       candidates: emitterCapture.candidates,
       pendingReads,
       stream,
       timeoutMillis,
     });
+    input.debug?.(
+      `capture subscription wait: ${Math.round(performance.now() - subscriptionStarted)}ms`,
+    );
 
     input.debug?.(
       `captured ${emitterCapture.candidates.length} EventEmitter candidates`,
     );
 
     for (const candidate of emitterCapture.candidates) {
+      const verifyStarted = performance.now();
       const verified = yield* busEchoesProbe({
         bus: candidate.bus,
         pendingReads,
         stream,
         timeoutMillis,
       });
+      input.debug?.(
+        `candidate validation ${candidate.source}.${candidate.method}: ${Math.round(performance.now() - verifyStarted)}ms`,
+      );
 
       if (!verified) {
         input.debug?.(
@@ -112,22 +124,34 @@ export const captureGlobalBus = Effect.fn("captureGlobalBus")(function* (
 
     const scanBinary =
       input.scanBinary ?? (() => fs.readFile(process.execPath, "latin1"));
+    const binaryReadStarted = performance.now();
     const binary = yield* Effect.tryPromise(scanBinary).pipe(Effect.option);
+    input.debug?.(
+      `Bun virtual chunk binary read: ${Math.round(performance.now() - binaryReadStarted)}ms`,
+    );
 
     if (Option.isNone(binary)) {
       input.debug?.("Bun virtual chunk scan failed");
       return undefined;
     }
 
+    const binaryScanStarted = performance.now();
     const candidates = findBunfsCandidates(binary.value);
+    input.debug?.(
+      `Bun virtual chunk binary scan: ${Math.round(performance.now() - binaryScanStarted)}ms`,
+    );
     input.debug?.(`Bun virtual chunk candidates: ${candidates.length}`);
 
     const importModule =
       input.importModule ?? ((specifier: string) => import(specifier));
     for (const candidate of candidates) {
+      const importStarted = performance.now();
       const module = yield* Effect.tryPromise(() =>
         importModule(candidate.specifier),
       ).pipe(Effect.option);
+      input.debug?.(
+        `Bun virtual chunk import ${candidate.specifier}: ${Math.round(performance.now() - importStarted)}ms`,
+      );
 
       if (Option.isNone(module)) {
         input.debug?.(
@@ -142,12 +166,17 @@ export const captureGlobalBus = Effect.fn("captureGlobalBus")(function* (
         continue;
       }
 
+      const verifyStarted = performance.now();
       const verified = yield* busEchoesProbe({
         bus,
         pendingReads,
         stream,
         timeoutMillis,
       });
+
+      input.debug?.(
+        `Bun virtual chunk validation ${candidate.specifier}#${candidate.exportName}: ${Math.round(performance.now() - verifyStarted)}ms`,
+      );
 
       if (!verified) {
         input.debug?.(
