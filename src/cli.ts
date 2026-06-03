@@ -4,7 +4,7 @@ import { Console, Effect, Schema, Stream } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess } from "effect/unstable/process";
 
-const version = "0.1.0";
+const version = "0.1.1";
 const installArgs = ["plugin", "opencode-live", "--global"] as const;
 const manualInstallMessage = `Manual install:
   opencode plugin opencode-live --global
@@ -55,8 +55,9 @@ const install = Command.make(
       );
 
       const result = yield* runOpencodePlugin(opencode);
-      if (result.exitCode !== 0)
+      if (result.exitCode !== 0) {
         return yield* new OpencodeInstallFailed(result);
+      }
 
       yield* Console.log(
         "opencode-live is installed globally. Restart opencode to load the plugin.",
@@ -90,7 +91,10 @@ const program = Command.run(app, { version }).pipe(
         yield* Console.error(
           `opencode plugin install failed with exit code ${error.exitCode}. Your existing config was left to opencode unchanged.`,
         );
-        if (error.output.trim()) yield* Console.error(error.output.trim());
+        const output = error.output.trim();
+        if (output) {
+          yield* Console.error(output);
+        }
         yield* Console.error(manualInstallMessage);
         yield* Effect.sync(() => {
           process.exitCode = 1;
@@ -102,7 +106,11 @@ const program = Command.run(app, { version }).pipe(
 
 const findOpencodeCli = Effect.fn("findOpencodeCli")(function* () {
   const opencode = yield* Effect.sync(() => Bun.which("opencode"));
-  if (!opencode) return yield* new OpencodeCliNotFound();
+
+  if (!opencode) {
+    return yield* new OpencodeCliNotFound();
+  }
+
   return opencode;
 });
 
