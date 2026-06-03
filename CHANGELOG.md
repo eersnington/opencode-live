@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 - 2026-06-03
+
+- Add support for syncing desktop app sessions with TUI and web clients.
+- Support desktop sessions protected by opencode server Basic auth.
+
 ## 0.1.1 - 2026-06-03
 
 - Add `bunx opencode-live install` for installing the plugin through opencode.

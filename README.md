@@ -2,7 +2,7 @@
 
 Keep opencode chat sessions reactively synced across multiple clients sharing the same `opencode.db`.
 
-Open a chat session across multiple opencode TUI or web clients at the same time. When one client receives a relayable chat event, peers with a working refresh path update; streaming text included when opencode emits live deltas.
+Open a chat session across multiple opencode TUI, web, or desktop clients at the same time. When one client receives a relayable chat event, peers with a working refresh path update; streaming text included when opencode emits live deltas.
 
 ---
 
@@ -40,8 +40,8 @@ Every opencode runtime that loads the plugin does three things:
 3. Relays native chat events to every other runtime sharing that database
 
 ```text
-  opencode A (TUI)          opencode B (web)
-  ----------------          ----------------
+  opencode A (TUI)          opencode B (web/desktop)
+  ----------------          ------------------------
        |                         |
        | loads plugin            | loads plugin
        v                         v
@@ -95,7 +95,7 @@ When a source runtime receives a native opencode chat event, the plugin forwards
           |
           |  republish as native opencode UI event
           v
-  receiver TUI / web reducers update
+   receiver TUI / web / desktop reducers update
 ```
 
 Each relayed event includes an `originProcessID`; receivers also ignore events from their own process if they ever see them.
@@ -116,7 +116,8 @@ The plugin probes for opencode's internal event bus and uses the first path that
   +-----------------------------------------------------------------+
   |  2. global-bus-capture                                          |
   |     subscribe to client.global.event(), capture an emitter      |
-  |     or Bun virtual module candidate, then verify with a probe   |
+  |     serverUrl /global/event SSE, or Bun virtual module          |
+  |     candidate, then verify with a probe                         |
   |     -> used when direct import is unavailable                   |
   +-----------------------------------------------------------------+
   |  3. worker-rpc                                                  |
@@ -128,7 +129,7 @@ The plugin probes for opencode's internal event bus and uses the first path that
   +-----------------------------------------------------------------+
 ```
 
-All three active modes republish relayable opencode events, including `message.part.delta` when opencode emits it.
+All three active modes republish relayable opencode events, including `message.part.delta` when opencode emits it. Desktop support uses the same capture mode when the opencode server URL exposes `/global/event`.
 
 ---
 
@@ -146,7 +147,7 @@ When opencode emits live `message.part.delta` events, `opencode-live` relays the
        |                          |                      |  republish same event
        |                          |                      |  through refresh path
        |                          |                      v
-       |                          |               receiver TUI/web
+       |                          |               receiver TUI/web/desktop
        |                          |               streams live text
 ```
 
