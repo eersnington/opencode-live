@@ -74,6 +74,25 @@ describe("global bus capture", () => {
     expect(captured).toBeDefined();
   });
 
+  test("waits for delayed global.event subscriptions", async () => {
+    const bus = new EventEmitter();
+    const client = {
+      global: {
+        async event(options?: { signal?: AbortSignal }) {
+          return {
+            stream: new DelayedSubscriptionStream(bus, 50, options?.signal),
+          };
+        },
+      },
+    };
+
+    const captured = await Effect.runPromise(
+      captureGlobalBus({ client, timeoutMillis: 150 }),
+    );
+
+    expect(captured).toBeDefined();
+  });
+
   test("validates a later candidate when the first candidate is wrong", async () => {
     const wrong = new EventEmitter();
     const bus = new EventEmitter();
@@ -302,6 +321,72 @@ class DeferredSubscriptionStream implements AsyncIterator<unknown> {
   }
 
   private unsubscribe() {
+    if (!this.subscribed) {
+      return;
+    }
+
+    this.subscribed = false;
+    this.bus.off("event", this.handler);
+  }
+}
+
+class DelayedSubscriptionStream implements AsyncIterator<unknown> {
+  private readonly queue = new AsyncEventQueue();
+  private readonly handler = (event: GlobalBusEvent) => {
+    this.queue.push(event);
+  };
+  private pulled = false;
+  private subscribed = false;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(
+    private readonly bus: EventEmitter,
+    private readonly delayMillis: number,
+    signal?: AbortSignal,
+  ) {
+    signal?.addEventListener("abort", () => {
+      this.unsubscribe();
+      this.queue.close();
+    });
+  }
+
+  next(): Promise<IteratorResult<unknown>> {
+    if (!this.pulled) {
+      this.pulled = true;
+      return Promise.resolve({
+        done: false,
+        value: {
+          payload: {
+            id: "evt_connected",
+            type: "server.connected",
+            properties: {},
+          },
+        },
+      });
+    }
+
+    if (!this.subscribed && !this.timer) {
+      this.timer = setTimeout(() => {
+        this.timer = undefined;
+        this.subscribed = true;
+        this.bus.on("event", this.handler);
+      }, this.delayMillis);
+    }
+
+    return this.queue.next();
+  }
+
+  return(value?: unknown): Promise<IteratorResult<unknown>> {
+    this.unsubscribe();
+    return this.queue.return(value);
+  }
+
+  private unsubscribe() {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+    }
+
     if (!this.subscribed) {
       return;
     }
