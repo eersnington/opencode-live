@@ -205,7 +205,7 @@ Runtime probing is mandatory because source opencode can expose internals while 
 ```sh
 bun install
 bun run typecheck
-bun test
+bun run test
 bun run lint
 bun run build
 bun ./dist/src/cli.js install --dry-run

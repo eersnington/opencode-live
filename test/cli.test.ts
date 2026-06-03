@@ -1,29 +1,57 @@
-import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
+import { spawn, type ChildProcess } from "node:child_process";
+import { text } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
+import { assert, describe, it } from "@effect/vitest";
 
 const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
 describe("CLI", () => {
-  test("dry-run install reports delegated opencode command", async () => {
-    const result = await runCli(["install", "--dry-run"]);
+  it.live("dry-run install reports delegated opencode command", () =>
+    Effect.gen(function* () {
+      const result = yield* runCli(["install", "--dry-run"]);
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain(
-      "Would install opencode-live globally with",
-    );
-    expect(result.stdout).toContain("opencode plugin opencode-live --global");
-  });
+      assert.strictEqual(result.exitCode, 0);
+      assert.include(
+        result.stdout,
+        "Would install opencode-live globally with",
+      );
+      assert.include(result.stdout, "opencode plugin opencode-live --global");
+    }),
+  );
 });
 
-async function runCli(args: string[]) {
-  const proc = Bun.spawn([process.execPath, cliPath, ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
+function runCli(args: string[]) {
+  return Effect.gen(function* () {
+    const proc = spawn("bun", [cliPath, ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const [stdout, stderr, exitCode] = yield* Effect.all(
+      [
+        Effect.promise(() => text(proc.stdout)),
+        Effect.promise(() => text(proc.stderr)),
+        waitForExit(proc),
+      ],
+      { concurrency: "unbounded" },
+    );
+
+    return { stdout, stderr, exitCode };
   });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  return { stdout, stderr, exitCode };
+}
+
+function waitForExit(child: ChildProcess) {
+  return Effect.callback<number, Error>((resume) => {
+    const onError = (error: Error) => resume(Effect.fail(error));
+
+    child.once("error", onError);
+    child.once("exit", (code) => {
+      child.off("error", onError);
+      resume(Effect.succeed(code ?? 1));
+    });
+
+    return Effect.sync(() => {
+      child.off("error", onError);
+      child.kill();
+    });
+  });
 }
