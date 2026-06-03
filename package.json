@@ -32,6 +32,7 @@
     }
   },
   "scripts": {
+    "benchmark:tui": "bun scripts/benchmark-tui-startup.ts",
     "build": "tsc -p tsconfig.build.json",
     "effect:check": "effect-language-service check",
     "effect:diagnostics": "effect-language-service diagnostics --project tsconfig.json",

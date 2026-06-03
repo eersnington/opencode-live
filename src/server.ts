@@ -58,8 +58,10 @@ const makeServerHooks = Effect.fn("makeServerHooks")(function* (
   ctx: PluginContext,
   options?: Options,
 ) {
+  const startupStarted = performance.now();
   const dataDir = options?.dataDir ?? opencodeDataDir();
 
+  const dbStarted = performance.now();
   const resolvedDbPath = yield* resolveOpencodeDbPath({
     dbPath: options?.dbPath,
     dataDir,
@@ -76,8 +78,11 @@ const makeServerHooks = Effect.fn("makeServerHooks")(function* (
   const debug = options?.debug
     ? (message: string) => console.error(`[opencode-live] ${message}`)
     : undefined;
+  const dbMillis = performance.now() - dbStarted;
 
+  const refreshStarted = performance.now();
   const refresh = yield* makeRefresh({ client: ctx.client, debug });
+  const refreshMillis = performance.now() - refreshStarted;
 
   if (options?.debug) {
     console.error(`[opencode-live] refresh mode: ${refresh.mode}`);
@@ -100,9 +105,14 @@ const makeServerHooks = Effect.fn("makeServerHooks")(function* (
     }
   };
 
+  const daemonStarted = performance.now();
   const peer = yield* connectOrStartDaemon(
     { dbPath: resolvedDbPath, hash, dataDir, options },
     handleDaemonMessage,
+  );
+  const daemonMillis = performance.now() - daemonStarted;
+  debug?.(
+    `startup timings: db=${Math.round(dbMillis)}ms refresh=${Math.round(refreshMillis)}ms daemon=${Math.round(daemonMillis)}ms total=${Math.round(performance.now() - startupStarted)}ms mode=${refresh.mode}`,
   );
 
   peer.send({
@@ -146,12 +156,25 @@ const connectOrStartDaemon = Effect.fn("connectOrStartDaemon")(function* (
   input: ConnectionInput,
   onMessage: (message: ServerMessage) => void,
 ) {
+  const registryStarted = performance.now();
   const registry = yield* readDaemonRegistry(input.hash, input.dataDir);
+  if (input.options?.debug) {
+    console.error(
+      `[opencode-live] daemon registry read: ${Math.round(performance.now() - registryStarted)}ms`,
+    );
+  }
 
   if (registry) {
+    const connectStarted = performance.now();
     const daemon = yield* connectToDaemon(registry.socketPath, onMessage).pipe(
       Effect.option,
     );
+
+    if (input.options?.debug) {
+      console.error(
+        `[opencode-live] daemon registry connect: ${Math.round(performance.now() - connectStarted)}ms`,
+      );
+    }
 
     if (Option.isSome(daemon)) {
       return daemon.value;
@@ -168,8 +191,21 @@ const connectOrStartDaemon = Effect.fn("connectOrStartDaemon")(function* (
   }
 
   const sock = socketPath(input.hash);
+  const spawnStarted = performance.now();
   yield* startDaemon({ ...input, socketPath: sock });
+  if (input.options?.debug) {
+    console.error(
+      `[opencode-live] daemon spawn: ${Math.round(performance.now() - spawnStarted)}ms`,
+    );
+  }
+
+  const waitStarted = performance.now();
   const daemon = yield* waitForDaemon(sock, onMessage);
+  if (input.options?.debug) {
+    console.error(
+      `[opencode-live] daemon wait: ${Math.round(performance.now() - waitStarted)}ms`,
+    );
+  }
 
   if (!daemon) {
     return yield* new DaemonNotReady({ socketPath: sock });
