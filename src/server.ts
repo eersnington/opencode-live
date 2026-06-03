@@ -81,7 +81,11 @@ const makeServerHooks = Effect.fn("makeServerHooks")(function* (
   const dbMillis = performance.now() - dbStarted;
 
   const refreshStarted = performance.now();
-  const refresh = yield* makeRefresh({ client: ctx.client, debug });
+  const refresh = yield* makeRefresh({
+    client: ctx.client,
+    serverUrl: ctx.serverUrl,
+    debug,
+  });
   const refreshMillis = performance.now() - refreshStarted;
 
   if (options?.debug) {

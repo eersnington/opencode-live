@@ -11,6 +11,9 @@ export type CaptureDebug = (message: string) => void;
 
 type CaptureInput = {
   client: unknown;
+  serverUrl?: URL;
+  env?: NodeJS.ProcessEnv;
+  fetch?: typeof fetch;
   timeoutMillis?: number;
   debug?: CaptureDebug;
   scanBinary?: () => Promise<string>;
@@ -54,10 +57,10 @@ function sleep(milliseconds: number) {
 export const captureGlobalBus = Effect.fn("captureGlobalBus")(function* (
   input: CaptureInput,
 ) {
-  const openGlobalEventStream = readOpenGlobalEventStream(input.client);
+  const openGlobalEventStream = readOpenGlobalEventStream(input);
 
   if (!openGlobalEventStream) {
-    input.debug?.("ctx.client.global.event is unavailable");
+    input.debug?.("global.event stream is unavailable");
     return undefined;
   }
 
@@ -320,6 +323,32 @@ function isProbeEvent(input: unknown, id: string) {
 }
 
 function readOpenGlobalEventStream(
+  input: CaptureInput,
+): OpenGlobalEventStream | undefined {
+  const fromServerUrl = input.serverUrl
+    ? openServerUrlGlobalEventStream({
+        serverUrl: input.serverUrl,
+        env: input.env ?? process.env,
+        fetch: input.fetch ?? fetch,
+        debug: input.debug,
+      })
+    : undefined;
+  const fromClient = readClientGlobalEventStream(input.client);
+
+  if (!fromServerUrl) {
+    return fromClient;
+  }
+
+  if (!fromClient) {
+    return fromServerUrl;
+  }
+
+  return async (signal) =>
+    (await fromServerUrl(signal).catch(() => undefined)) ??
+    (await fromClient(signal).catch(() => undefined));
+}
+
+function readClientGlobalEventStream(
   input: unknown,
 ): OpenGlobalEventStream | undefined {
   const client = Schema.decodeUnknownOption(GlobalEventClientShape)(input);
@@ -332,6 +361,99 @@ function readOpenGlobalEventStream(
     Promise.resolve(
       client.value.global.event.call(client.value.global, { signal }),
     ).then(readGlobalEventStream);
+}
+
+function openServerUrlGlobalEventStream(input: {
+  serverUrl: URL;
+  env: NodeJS.ProcessEnv;
+  fetch: typeof fetch;
+  debug?: CaptureDebug;
+}): OpenGlobalEventStream {
+  return async (signal) => {
+    const url = new URL("/global/event", input.serverUrl);
+    const response = await input.fetch(url, {
+      headers: serverAuthHeaders(input.env),
+      signal,
+    });
+
+    if (!response.ok || !response.body) {
+      input.debug?.(
+        `serverUrl global.event unavailable: HTTP ${response.status}`,
+      );
+      return undefined;
+    }
+
+    return sseJsonIterator(response.body);
+  };
+}
+
+function serverAuthHeaders(env: NodeJS.ProcessEnv): HeadersInit | undefined {
+  const password = env.OPENCODE_SERVER_PASSWORD;
+
+  if (!password) {
+    return undefined;
+  }
+
+  const username = env.OPENCODE_SERVER_USERNAME ?? "opencode";
+  return {
+    Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`,
+  };
+}
+
+function sseJsonIterator(
+  body: ReadableStream<Uint8Array>,
+): AsyncIterator<unknown> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const queue: unknown[] = [];
+
+  return {
+    async next() {
+      while (queue.length === 0) {
+        const read = await reader.read();
+
+        if (read.done) {
+          return { done: true, value: undefined };
+        }
+
+        buffer += decoder.decode(read.value, { stream: true });
+        buffer = drainSseJsonEvents(buffer, queue);
+      }
+
+      return { done: false, value: queue.shift() };
+    },
+    async return(value?: unknown) {
+      await reader.cancel().catch(() => undefined);
+      reader.releaseLock();
+      return { done: true, value };
+    },
+  };
+}
+
+function drainSseJsonEvents(buffer: string, queue: unknown[]) {
+  const chunks = buffer.split("\n\n");
+  const remainder = chunks.pop() ?? "";
+
+  for (const chunk of chunks) {
+    const data = chunk
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.replace(/^data:\s?/, ""))
+      .join("\n");
+
+    if (!data) {
+      continue;
+    }
+
+    try {
+      queue.push(JSON.parse(data));
+    } catch {
+      continue;
+    }
+  }
+
+  return remainder;
 }
 
 function readGlobalEventStream(

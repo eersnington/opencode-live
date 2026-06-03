@@ -1,9 +1,18 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { EventEmitter } from "node:events";
+import http from "node:http";
 import { findBunfsCandidates } from "../src/bunfs-global-bus.js";
 import { captureGlobalBus } from "../src/global-bus-capture.js";
 import type { GlobalBusEvent } from "../src/global-bus.js";
 import { assert, describe, it } from "@effect/vitest";
+
+class SseFixtureFailed extends Schema.TaggedErrorClass<SseFixtureFailed>()(
+  "SseFixtureFailed",
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
 
 describe("global bus capture", () => {
   it.live("captures and validates the bus used by global.event", () =>
@@ -168,6 +177,51 @@ describe("global bus capture", () => {
     }),
   );
 
+  it.live("captures and validates the bus through serverUrl SSE", () =>
+    Effect.acquireUseRelease(
+      startGlobalEventSseFixture({
+        username: "opencode",
+        password: "secret",
+      }),
+      (fixture) =>
+        Effect.gen(function* () {
+          const captured = yield* captureGlobalBus({
+            client: {},
+            serverUrl: fixture.serverUrl,
+            env: {
+              OPENCODE_SERVER_USERNAME: "opencode",
+              OPENCODE_SERVER_PASSWORD: "secret",
+            },
+            timeoutMillis: 150,
+          });
+
+          if (!captured) {
+            return yield* Effect.die("Expected serverUrl GlobalBus capture");
+          }
+
+          const received: GlobalBusEvent[] = [];
+          fixture.bus.on("event", (event) => {
+            received.push(event);
+          });
+          captured.emit("event", {
+            directory: "/tmp/project",
+            payload: {
+              id: "evt_test",
+              type: "message.updated",
+              properties: {},
+            },
+          });
+
+          assert.strictEqual(
+            fixture.authorizationHeaders[0],
+            "Basic b3BlbmNvZGU6c2VjcmV0",
+          );
+          assert.strictEqual(received.length, 1);
+        }),
+      (fixture) => fixture.close,
+    ),
+  );
+
   it("finds Bun virtual chunk candidates", () => {
     const binaryText =
       'import{Gp as L,Ir as P}from"/$bunfs/root/chunk-abc123.js";import{X as Y}from"/$bunfs/root/chunk-other.js";'.padEnd(
@@ -215,6 +269,90 @@ describe("global bus capture", () => {
     }),
   );
 });
+
+function startGlobalEventSseFixture(input: {
+  username: string;
+  password: string;
+}) {
+  return Effect.callback<
+    {
+      authorizationHeaders: string[];
+      bus: EventEmitter;
+      close: Effect.Effect<void>;
+      serverUrl: URL;
+    },
+    SseFixtureFailed
+  >((resume) => {
+    const bus = new EventEmitter();
+    const authorizationHeaders: string[] = [];
+    const expectedAuthorization = `Basic ${Buffer.from(`${input.username}:${input.password}`).toString("base64")}`;
+    const server = http.createServer((request, response) => {
+      authorizationHeaders.push(request.headers.authorization ?? "");
+
+      if (request.url !== "/global/event") {
+        response.writeHead(404).end();
+        return;
+      }
+
+      if (request.headers.authorization !== expectedAuthorization) {
+        response.writeHead(401).end();
+        return;
+      }
+
+      response.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+      });
+
+      const send = (event: GlobalBusEvent) => {
+        response.write(`data: ${JSON.stringify(event)}\n\n`);
+      };
+      bus.on("event", send);
+      send({
+        payload: {
+          id: "evt_connected",
+          type: "server.connected",
+          properties: {},
+        },
+      });
+      request.on("close", () => {
+        bus.off("event", send);
+      });
+    });
+
+    const fail = (message: string, cause?: unknown) => {
+      resume(Effect.fail(new SseFixtureFailed({ message, cause })));
+    };
+
+    server.once("error", (error) => {
+      fail("SSE fixture server emitted an error before it was ready", error);
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        fail("SSE fixture did not receive a TCP address");
+        return;
+      }
+
+      resume(
+        Effect.succeed({
+          authorizationHeaders,
+          bus,
+          close: Effect.promise(
+            () =>
+              new Promise<void>((resolve) => {
+                server.close(() => resolve());
+              }),
+          ),
+          serverUrl: new URL(`http://127.0.0.1:${address.port}`),
+        }),
+      );
+    });
+
+    return Effect.sync(() => server.close());
+  });
+}
 
 class AsyncEventQueue implements AsyncIterator<unknown> {
   private readonly values: unknown[] = [];

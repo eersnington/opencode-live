@@ -91,6 +91,28 @@ describe("refresh", () => {
     }),
   );
 
+  it.effect("passes serverUrl into GlobalBus capture", () =>
+    Effect.gen(function* () {
+      let seenServerUrl: URL | undefined;
+      const refresh = yield* makeRefresh({
+        client: {},
+        serverUrl: new URL("http://127.0.0.1:54321"),
+        importGlobalBus: () => Promise.reject(new Error("not exported")),
+        async captureGlobalBus(input) {
+          seenServerUrl = input.serverUrl;
+          return {
+            emit() {
+              return true;
+            },
+          };
+        },
+      });
+
+      assert.strictEqual(refresh.mode, "global-bus-capture");
+      assert.strictEqual(seenServerUrl?.href, "http://127.0.0.1:54321/");
+    }),
+  );
+
   it.effect("does not silently fall back to dispose", () =>
     withPostMessage(undefined)(
       Effect.gen(function* () {
