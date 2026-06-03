@@ -79,6 +79,7 @@ describe("global bus capture", () => {
             },
           },
           timeoutMillis: 10,
+          scanBinary: () => Promise.resolve(""),
         });
 
         assert.strictEqual(captured, undefined);
