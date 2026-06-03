@@ -1,15 +1,16 @@
-import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
 import { ProcessIDSchema } from "../src/protocol.js";
 import { makeRefresh } from "../src/refresh.js";
+import { assert, describe, it } from "@effect/vitest";
 
 const processID = Schema.decodeUnknownSync(ProcessIDSchema)("proc_1");
+const WorkerRpcEnvelopeJson = Schema.fromJsonString(Schema.Unknown);
 
 describe("refresh", () => {
-  test("prefers importable GlobalBus", async () => {
-    const emitted: unknown[] = [];
-    const refresh = await Effect.runPromise(
-      makeRefresh({
+  it.effect("prefers importable GlobalBus", () =>
+    Effect.gen(function* () {
+      const emitted: unknown[] = [];
+      const refresh = yield* makeRefresh({
         client: {},
         async importGlobalBus() {
           return {
@@ -21,13 +22,11 @@ describe("refresh", () => {
             },
           };
         },
-      }),
-    );
+      });
 
-    expect(refresh.mode).toBe("global-bus-import");
+      assert.strictEqual(refresh.mode, "global-bus-import");
 
-    await Effect.runPromise(
-      refresh.publish({
+      yield* refresh.publish({
         type: "event",
         originProcessID: processID,
         directory: "/tmp/project",
@@ -36,25 +35,25 @@ describe("refresh", () => {
           type: "message.updated",
           properties: { sessionID: "ses_1" },
         },
-      }),
-    );
+      });
 
-    expect(emitted[0]).toEqual({
-      directory: "/tmp/project",
-      project: undefined,
-      workspace: undefined,
-      payload: {
-        id: "evt_1",
-        type: "message.updated",
-        properties: { sessionID: "ses_1" },
-      },
-    });
-  });
+      assert.deepStrictEqual(emitted[0], {
+        directory: "/tmp/project",
+        project: undefined,
+        workspace: undefined,
+        payload: {
+          id: "evt_1",
+          type: "message.updated",
+          properties: { sessionID: "ses_1" },
+        },
+      });
+    }),
+  );
 
-  test("uses captured GlobalBus when import is unavailable", async () => {
-    const emitted: unknown[] = [];
-    const refresh = await Effect.runPromise(
-      makeRefresh({
+  it.effect("uses captured GlobalBus when import is unavailable", () =>
+    Effect.gen(function* () {
+      const emitted: unknown[] = [];
+      const refresh = yield* makeRefresh({
         client: {},
         importGlobalBus: () => Promise.reject(new Error("not exported")),
         async captureGlobalBus() {
@@ -65,13 +64,11 @@ describe("refresh", () => {
             },
           };
         },
-      }),
-    );
+      });
 
-    expect(refresh.mode).toBe("global-bus-capture");
+      assert.strictEqual(refresh.mode, "global-bus-capture");
 
-    await Effect.runPromise(
-      refresh.publish({
+      yield* refresh.publish({
         type: "event",
         originProcessID: processID,
         directory: "/tmp/project",
@@ -79,19 +76,25 @@ describe("refresh", () => {
           type: "message.part.delta",
           properties: { messageID: "msg_1", partID: "prt_1", delta: "hi" },
         },
-      }),
-    );
+      });
 
-    expect(emitted).toHaveLength(1);
-  });
+      assert.deepStrictEqual(emitted[0], {
+        directory: "/tmp/project",
+        project: undefined,
+        workspace: undefined,
+        payload: {
+          id: undefined,
+          type: "message.part.delta",
+          properties: { messageID: "msg_1", partID: "prt_1", delta: "hi" },
+        },
+      });
+    }),
+  );
 
-  test("does not silently fall back to dispose", async () => {
-    const original = globalThis.postMessage;
-    Reflect.deleteProperty(globalThis, "postMessage");
-
-    try {
-      const refresh = await Effect.runPromise(
-        makeRefresh({
+  it.effect("does not silently fall back to dispose", () =>
+    withPostMessage(undefined)(
+      Effect.gen(function* () {
+        const refresh = yield* makeRefresh({
           client: {
             instance: {
               dispose() {
@@ -101,68 +104,84 @@ describe("refresh", () => {
           },
           importGlobalBus: () => Promise.reject(new Error("not exported")),
           captureGlobalBus: () => Promise.resolve(undefined),
+        });
+
+        assert.strictEqual(refresh.mode, "none");
+      }),
+    ),
+  );
+
+  it.effect("uses worker RPC when GlobalBus paths are unavailable", () =>
+    Effect.gen(function* () {
+      const messages: string[] = [];
+
+      yield* withPostMessage((message: string) => {
+        messages.push(message);
+      })(
+        Effect.gen(function* () {
+          const refresh = yield* makeRefresh({
+            client: {},
+            importGlobalBus: () => Promise.reject(new Error("not exported")),
+            captureGlobalBus: () => Promise.resolve(undefined),
+          });
+
+          assert.strictEqual(refresh.mode, "worker-rpc");
+
+          yield* refresh.publish({
+            type: "event",
+            originProcessID: processID,
+            directory: "/tmp/project",
+            projectID: "project_1",
+            event: {
+              id: "evt_1",
+              type: "message.updated",
+              properties: { sessionID: "ses_1" },
+            },
+          });
         }),
       );
 
-      expect(refresh.mode).toBe("none");
-    } finally {
-      if (original !== undefined) {
-        Reflect.set(globalThis, "postMessage", original);
-      }
-    }
-  });
-
-  test("uses worker RPC when GlobalBus paths are unavailable", async () => {
-    const messages: string[] = [];
-    const original = globalThis.postMessage;
-    Reflect.set(globalThis, "postMessage", (message: string) => {
-      messages.push(message);
-    });
-
-    try {
-      const refresh = await Effect.runPromise(
-        makeRefresh({
-          client: {},
-          importGlobalBus: () => Promise.reject(new Error("not exported")),
-          captureGlobalBus: () => Promise.resolve(undefined),
-        }),
-      );
-
-      expect(refresh.mode).toBe("worker-rpc");
-
-      await Effect.runPromise(
-        refresh.publish({
-          type: "event",
-          originProcessID: processID,
-          directory: "/tmp/project",
-          projectID: "project_1",
-          event: {
-            id: "evt_1",
-            type: "message.updated",
-            properties: { sessionID: "ses_1" },
-          },
-        }),
-      );
-
-      expect(JSON.parse(messages[0] ?? "{}")).toEqual({
-        type: "rpc.event",
-        event: "global.event",
-        data: {
-          directory: "/tmp/project",
-          project: "project_1",
-          payload: {
-            id: "evt_1",
-            type: "message.updated",
-            properties: { sessionID: "ses_1" },
+      assert.deepStrictEqual(
+        Schema.decodeUnknownSync(WorkerRpcEnvelopeJson)(messages[0] ?? "{}"),
+        {
+          type: "rpc.event",
+          event: "global.event",
+          data: {
+            directory: "/tmp/project",
+            project: "project_1",
+            payload: {
+              id: "evt_1",
+              type: "message.updated",
+              properties: { sessionID: "ses_1" },
+            },
           },
         },
-      });
-    } finally {
-      if (original === undefined) {
-        Reflect.deleteProperty(globalThis, "postMessage");
-      } else {
-        Reflect.set(globalThis, "postMessage", original);
-      }
-    }
-  });
+      );
+    }),
+  );
 });
+
+function withPostMessage(value: ((message: string) => void) | undefined) {
+  return <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => globalThis.postMessage),
+      () =>
+        Effect.sync(() => {
+          if (value === undefined) {
+            Reflect.deleteProperty(globalThis, "postMessage");
+            return;
+          }
+
+          Reflect.set(globalThis, "postMessage", value);
+        }).pipe(Effect.andThen(effect)),
+      (original) =>
+        Effect.sync(() => {
+          if (original === undefined) {
+            Reflect.deleteProperty(globalThis, "postMessage");
+            return;
+          }
+
+          Reflect.set(globalThis, "postMessage", original);
+        }),
+    );
+}

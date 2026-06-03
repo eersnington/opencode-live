@@ -159,7 +159,7 @@ The plugin does not synthesize missing parts; it republishes the event it receiv
 ```sh
 bun install
 bun run typecheck
-bun test
+bun run test
 bun run lint
 bun run format:check
 bun run build
