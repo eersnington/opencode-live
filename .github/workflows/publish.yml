@@ -35,7 +35,9 @@ jobs:
       - name: Test
         run: bun run test
 
-      # npm publish runs `prepublishOnly` (bun run build) automatically,
-      # so we don't need an explicit build step.
+      # Build before publish so npm validates package.json after bin targets exist.
+      - name: Build
+        run: bun run build
+
       - name: Publish (OIDC, no token)
         run: npm publish --provenance
