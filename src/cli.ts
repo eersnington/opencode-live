@@ -4,7 +4,7 @@ import { Console, Effect, Schema, Stream } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess } from "effect/unstable/process";
 
-const version = "0.1.1";
+const version = "0.1.2";
 const installArgs = ["plugin", "opencode-live", "--global"] as const;
 const manualInstallMessage = `Manual install:
   opencode plugin opencode-live --global

@@ -1,5 +1,9 @@
 # opencode-live PRD
 
+<!--
+This PRD is outdated. Review files in `src/` for the latest implementation details.
+-->
+
 ## Goal
 
 `opencode-live` keeps the same opencode chat session live across multiple local opencode clients that share one `opencode.db`.
