@@ -1,14 +1,28 @@
 # opencode-live
 
-Sync your chat sessions across opencode runtimes. 
+Sync local opencode chat sessions across running opencode runtimes that share one `opencode.db`.
 
-## Commands
+`opencode-live` installs as an opencode server plugin. Each running opencode process connects to one local daemon for the active database, relays native chat events over local IPC, and republishes them into the receiving process through opencode's internal event path when available.
 
-The CLI remains only to make the project state explicit:
+## Install
+
+```sh
+bunx opencode-live install
+```
+
+The installer delegates to:
+
+```sh
+opencode plugin opencode-live --global
+```
+
+Dry run:
 
 ```sh
 bunx opencode-live install --dry-run
 ```
+
+Restart every running opencode instance after install so each process loads the plugin.
 
 ## Development
 

@@ -76,10 +76,12 @@ opencode B
 
 ## UI Update Strategy
 
-Primary path: import opencode's private global event bus from the plugin process.
+Primary path: get opencode's private global event bus from the plugin process.
+
+First try source-build import:
 
 ```ts
-const { GlobalBus } = await import("opencode/bus/global")
+const { GlobalBus } = await import("opencode/bus/global");
 ```
 
 If that succeeds, emit the same event shape opencode already sends to TUI/web:
@@ -93,7 +95,7 @@ GlobalBus.emit("event", {
     type: "message.part.updated",
     properties: { sessionID, part, time },
   },
-})
+});
 ```
 
 Native event shapes to emit:
@@ -109,13 +111,28 @@ Native event shapes to emit:
 { type: "todo.updated", properties: { sessionID, todos } }
 ```
 
-Fallback path: if private bus import fails, call instance dispose for coarse refresh.
+If source-build import fails, use the binary-safe capture path:
 
 ```ts
-await client.instance.dispose({ directory })
+// Temporarily patch EventEmitter.prototype.on.
+// Open client.global.event({ signal }).
+// Capture the emitter used by GlobalBus.on("event", handler).
+// Validate it by emitting an opencode-live probe and receiving it on the SSE stream.
 ```
 
-This triggers `server.instance.disposed`, which TUI and web already use to bootstrap/refresh the directory. This fallback refreshes persisted DB state only; it does not support streaming deltas.
+If both global bus paths fail inside the TUI worker, post opencode's own worker RPC envelope:
+
+```ts
+globalThis.postMessage(
+  JSON.stringify({
+    type: "rpc.event",
+    event: "global.event",
+    data: { directory, project, workspace, payload },
+  }),
+);
+```
+
+Do not automatically fall back to `client.instance.dispose`. It triggers `server.instance.disposed`, reloads/reinitializes the instance, does not replay native chat events, and does not solve realtime chat sync.
 
 ## Database Contract
 
@@ -142,8 +159,8 @@ IPC is local-only and scoped by DB hash.
 Messages:
 
 - `hello`: plugin process identity and DB context.
-- `session.changed`: durable DB changes coalesced by session.
-- `part.delta`: streaming delta relay.
+- `event`: native opencode event relay.
+- `shutdown`: daemon shutdown request.
 - `error`: daemon error.
 
 Every relayed message includes an origin process ID so clients ignore their own echoes.
@@ -160,8 +177,9 @@ TUI and web only render a delta if the target part already exists locally.
 
 ## Capability Modes
 
-- `global-bus`: private `opencode/bus/global` import works. Persisted sync and streaming sync are enabled.
-- `dispose`: private import fails, but `client.instance.dispose` works. Persisted sync is coarse-refresh only; streaming is unavailable.
+- `global-bus-import`: private `opencode/bus/global` import works. Persisted sync and streaming sync are enabled.
+- `global-bus-capture`: binary-safe EventEmitter/SSE capture works. Persisted sync and streaming sync are enabled.
+- `worker-rpc`: TUI worker RPC bridge is available. Persisted sync and streaming sync are enabled for runtimes listening to worker `global.event` messages.
 - `none`: no viable refresh path. Realtime sync is unavailable and must be reported clearly.
 
 Runtime probing is mandatory because source opencode can expose internals while installed binary packages may not.
@@ -178,8 +196,7 @@ Runtime probing is mandatory because source opencode can expose internals while 
 
 - Two TUI clients on the same session show persisted message changes without reopening.
 - TUI and web on the same session show persisted message changes without manual refresh.
-- Streaming text appears in another client before final persistence in `global-bus` mode.
-- `dispose` mode refreshes persisted state and explicitly disables streaming.
+- Streaming text appears in another client before final persistence in either global bus mode.
 - Attachments keep opencode's native part format and render unchanged.
 - `bunx opencode-live install --dry-run` prints the delegated install command.
 
