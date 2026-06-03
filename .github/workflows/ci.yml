@@ -40,7 +40,7 @@ jobs:
         run: bun run build
 
       - name: Install opencode CLI
-        run: bun install --global opencode@latest
+        run: bun install --global opencode-ai@latest
 
       - name: Benchmark TUI startup
         run: bun run benchmark:tui -- --runs 3 --warmup 1 --timeout-ms 30000 --opencode "$(command -v opencode)"
