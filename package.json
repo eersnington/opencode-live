@@ -24,11 +24,14 @@
     "README.md"
   ],
   "type": "module",
-  "main": "./dist/src/server.js",
   "exports": {
     "./server": {
       "import": "./dist/src/server.js",
       "types": "./dist/src/server.d.ts"
+    },
+    "./tui": {
+      "import": "./dist/src/tui.js",
+      "types": "./dist/src/tui.d.ts"
     }
   },
   "scripts": {

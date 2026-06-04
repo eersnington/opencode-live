@@ -1,15 +1,14 @@
 import type { Plugin } from "@opencode-ai/plugin";
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { Effect, Exit, Option, Schema } from "effect";
-import { opencodeDataDir, resolveOpencodeDbPath } from "./opencode-db.js";
+import { opencodeDataDir, resolveOpencodeDbContext } from "./opencode-db.js";
 import { connectIpc, socketPath } from "./ipc.js";
 import { daemonRegistryFile, readDaemonRegistry } from "./daemon-registry.js";
 import {
   AllowedEventTypeSchema,
-  DbHashSchema,
   ProcessIDSchema,
   type DbHash,
   type ServerMessage,
@@ -21,6 +20,7 @@ type Options = {
   dataDir?: string;
   bunPath?: string;
   debug?: boolean;
+  idleTimeoutMillis?: number;
 };
 
 type ConnectionInput = {
@@ -62,14 +62,10 @@ const makeServerHooks = Effect.fn("makeServerHooks")(function* (
   const dataDir = options?.dataDir ?? opencodeDataDir();
 
   const dbStarted = performance.now();
-  const resolvedDbPath = yield* resolveOpencodeDbPath({
+  const dbContext = yield* resolveOpencodeDbContext({
     dbPath: options?.dbPath,
     dataDir,
   });
-
-  const hash = Schema.decodeUnknownSync(DbHashSchema)(
-    createHash("md5").update(path.resolve(resolvedDbPath)).digest("hex"),
-  );
 
   const processID = Schema.decodeUnknownSync(ProcessIDSchema)(
     `${process.pid}-${randomUUID()}`,
@@ -111,7 +107,7 @@ const makeServerHooks = Effect.fn("makeServerHooks")(function* (
 
   const daemonStarted = performance.now();
   const peer = yield* connectOrStartDaemon(
-    { dbPath: resolvedDbPath, hash, dataDir, options },
+    { dbPath: dbContext.dbPath, hash: dbContext.dbHash, dataDir, options },
     handleDaemonMessage,
   );
   const daemonMillis = performance.now() - daemonStarted;
@@ -122,8 +118,8 @@ const makeServerHooks = Effect.fn("makeServerHooks")(function* (
   peer.send({
     type: "hello",
     processID,
-    dbPath: resolvedDbPath,
-    dbHash: hash,
+    dbPath: dbContext.dbPath,
+    dbHash: dbContext.dbHash,
     directory: ctx.directory,
     projectID: ctx.project.id,
   });
@@ -258,28 +254,36 @@ const waitForDaemon = Effect.fn("waitForDaemon")(function* (
 const startDaemon = Effect.fn("startDaemon")(function* (
   input: ConnectionInput & { socketPath: string },
 ) {
+  const bun =
+    input.options?.bunPath ??
+    (typeof Bun === "undefined"
+      ? process.env.BUN_INSTALL
+        ? path.join(process.env.BUN_INSTALL, "bin", "bun")
+        : "bun"
+      : (Bun.which("bun") ?? process.execPath));
+  const daemonPath = path.join(import.meta.dirname, "daemon.js");
+  const daemonArgs = [
+    daemonPath,
+    "--db",
+    input.dbPath,
+    "--hash",
+    input.hash,
+    "--socket",
+    input.socketPath,
+    "--data-dir",
+    input.dataDir,
+  ];
+  if (input.options?.idleTimeoutMillis !== undefined) {
+    daemonArgs.push(
+      "--idle-timeout-ms",
+      String(input.options.idleTimeoutMillis),
+    );
+  }
+
   yield* Effect.try({
     try: () => {
-      const bun =
-        input.options?.bunPath ??
-        (typeof Bun === "undefined"
-          ? process.env.BUN_INSTALL
-            ? path.join(process.env.BUN_INSTALL, "bin", "bun")
-            : "bun"
-          : (Bun.which("bun") ?? process.execPath));
-      const daemonPath = path.join(import.meta.dirname, "daemon.js");
-      const daemonArgs = [
-        daemonPath,
-        "--db",
-        input.dbPath,
-        "--hash",
-        input.hash,
-        "--socket",
-        input.socketPath,
-        "--data-dir",
-        input.dataDir,
-      ];
       const child = spawn(bun, daemonArgs, {
+        argv0: "opencode-live",
         detached: true,
         stdio: "ignore",
       });

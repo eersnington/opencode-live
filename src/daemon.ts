@@ -11,6 +11,7 @@ type DaemonConfig = {
   dbHash: DbHash;
   socketPath: string;
   dataDir?: string;
+  idleTimeoutMillis?: number;
 };
 
 class DaemonArgsInvalid extends Schema.TaggedErrorClass<DaemonArgsInvalid>()(
@@ -40,6 +41,7 @@ const readDaemonConfig = Effect.fn("readDaemonConfig")(function* (
           hash: { type: "string" },
           socket: { type: "string" },
           "data-dir": { type: "string" },
+          "idle-timeout-ms": { type: "string" },
         },
         strict: true,
       }),
@@ -52,7 +54,7 @@ const readDaemonConfig = Effect.fn("readDaemonConfig")(function* (
   if (!values.db || !values.hash || !values.socket) {
     return yield* new DaemonArgsInvalid({
       message:
-        "Usage: daemon --db <path> --hash <hash> --socket <socket> [--data-dir <dir>]",
+        "Usage: daemon --db <path> --hash <hash> --socket <socket> [--data-dir <dir>] [--idle-timeout-ms <milliseconds>]",
     });
   }
 
@@ -69,7 +71,28 @@ const readDaemonConfig = Effect.fn("readDaemonConfig")(function* (
     dbHash: dbHash.success,
     socketPath: values.socket,
     dataDir: values["data-dir"],
+    idleTimeoutMillis: yield* readIdleTimeoutMillis(
+      values["idle-timeout-ms"] ?? process.env.OPENCODE_LIVE_IDLE_TIMEOUT_MS,
+    ),
   };
+});
+
+const readIdleTimeoutMillis = Effect.fn("readIdleTimeoutMillis")(function* (
+  value: string | undefined,
+): Effect.fn.Return<number | undefined, DaemonArgsInvalid> {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return yield* new DaemonArgsInvalid({
+      message:
+        "Invalid daemon --idle-timeout-ms: expected a non-negative number of milliseconds",
+    });
+  }
+
+  return parsed;
 });
 
 BunRuntime.runMain(daemonProgram);

@@ -12,6 +12,9 @@ const manualInstallMessage = `Manual install:
 If the opencode CLI is unavailable, add this to ~/.config/opencode/opencode.json:
   { "plugin": ["opencode-live"] }
 
+And add this to ~/.config/opencode/tui.json:
+  { "plugin": ["opencode-live"] }
+
 Then restart opencode.`;
 
 class OpencodeCliNotFound extends Schema.TaggedErrorClass<OpencodeCliNotFound>()(

@@ -1,8 +1,10 @@
 import fs from "node:fs/promises";
-import { Clock, Deferred, Effect } from "effect";
+import { Clock, Deferred, Effect, Fiber, Option, Queue } from "effect";
 import { daemonRegistryFile, writeDaemonRegistry } from "./daemon-registry.js";
 import { createIpcServer, type IpcPeer } from "./ipc.js";
 import type { ClientMessage, DbHash } from "./protocol.js";
+
+export const defaultIdleTimeoutMillis = 5 * 60 * 1_000;
 
 export type DaemonRuntimeConfig = {
   dbPath: string;
@@ -12,11 +14,13 @@ export type DaemonRuntimeConfig = {
   daemonPath?: string;
   signals?: readonly NodeJS.Signals[];
   listening?: Deferred.Deferred<void>;
+  idleTimeoutMillis?: number;
 };
 
 type DaemonRuntimeState = {
   server: ReturnType<typeof createIpcServer>;
   peers: Set<IpcPeer>;
+  idleFiber?: Fiber.Fiber<void>;
   signalHandlers: Array<{
     signal: NodeJS.Signals;
     handler: () => void;
@@ -46,6 +50,9 @@ const acquireDaemonRuntime = Effect.fn("acquireDaemonRuntime")(function* (
   const startedAt = yield* Clock.currentTimeMillis;
   const peers = new Set<IpcPeer>();
   const clients = new Set<IpcPeer>();
+  const peerCounts = yield* Queue.sliding<number>(1);
+  const idleTimeoutMillis =
+    config.idleTimeoutMillis ?? defaultIdleTimeoutMillis;
   let shuttingDown = false;
   const requestShutdown = () => {
     if (shuttingDown) {
@@ -55,6 +62,16 @@ const acquireDaemonRuntime = Effect.fn("acquireDaemonRuntime")(function* (
     shuttingDown = true;
     Deferred.doneUnsafe(shutdown, Effect.void);
   };
+
+  const idleFiber =
+    idleTimeoutMillis > 0
+      ? yield* manageIdleShutdown({
+          peerCounts,
+          idleTimeoutMillis,
+          requestShutdown,
+        }).pipe(Effect.forkDetach({ startImmediately: true }))
+      : undefined;
+  Queue.offerUnsafe(peerCounts, peers.size);
 
   yield* Effect.tryPromise(() =>
     fs.rm(config.socketPath, { force: true }),
@@ -77,10 +94,12 @@ const acquireDaemonRuntime = Effect.fn("acquireDaemonRuntime")(function* (
     socketPath: config.socketPath,
     onClient(client) {
       peers.add(client);
+      Queue.offerUnsafe(peerCounts, peers.size);
     },
     onClose(client) {
       peers.delete(client);
       clients.delete(client);
+      Queue.offerUnsafe(peerCounts, peers.size);
     },
     onError(client, error) {
       client.send({ type: "error", message: error.message });
@@ -101,7 +120,12 @@ const acquireDaemonRuntime = Effect.fn("acquireDaemonRuntime")(function* (
     return { signal, handler };
   });
 
-  return { server, peers, signalHandlers } satisfies DaemonRuntimeState;
+  return {
+    server,
+    peers,
+    idleFiber,
+    signalHandlers,
+  } satisfies DaemonRuntimeState;
 });
 
 const releaseDaemonRuntime = Effect.fn("releaseDaemonRuntime")(function* (
@@ -110,6 +134,10 @@ const releaseDaemonRuntime = Effect.fn("releaseDaemonRuntime")(function* (
 ) {
   for (const { signal, handler } of state.signalHandlers) {
     process.off(signal, handler);
+  }
+
+  if (state.idleFiber) {
+    yield* Fiber.interrupt(state.idleFiber).pipe(Effect.ignore);
   }
 
   yield* Effect.sync(() => {
@@ -139,6 +167,34 @@ const releaseDaemonRuntime = Effect.fn("releaseDaemonRuntime")(function* (
     { concurrency: "unbounded" },
   ).pipe(Effect.ignore);
 });
+
+export const manageIdleShutdown = Effect.fn("manageIdleShutdown")(
+  function* (input: {
+    peerCounts: Queue.Dequeue<number>;
+    idleTimeoutMillis: number;
+    requestShutdown: () => void;
+  }) {
+    let peerCount = yield* Queue.take(input.peerCounts);
+
+    while (true) {
+      if (peerCount > 0) {
+        peerCount = yield* Queue.take(input.peerCounts);
+        continue;
+      }
+
+      const nextPeerCount = yield* Queue.take(input.peerCounts).pipe(
+        Effect.timeoutOption(`${input.idleTimeoutMillis} millis`),
+      );
+
+      if (Option.isNone(nextPeerCount)) {
+        input.requestShutdown();
+        return;
+      }
+
+      peerCount = nextPeerCount.value;
+    }
+  },
+);
 
 function listen(
   server: ReturnType<typeof createIpcServer>,
