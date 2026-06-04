@@ -21,6 +21,7 @@ type Options = {
   dataDir?: string;
   bunPath?: string;
   debug?: boolean;
+  idleTimeoutMillis?: number;
 };
 
 type ConnectionInput = {
@@ -279,6 +280,12 @@ const startDaemon = Effect.fn("startDaemon")(function* (
         "--data-dir",
         input.dataDir,
       ];
+      if (input.options?.idleTimeoutMillis !== undefined) {
+        daemonArgs.push(
+          "--idle-timeout-ms",
+          String(input.options.idleTimeoutMillis),
+        );
+      }
       const child = spawn(bun, daemonArgs, {
         detached: true,
         stdio: "ignore",
