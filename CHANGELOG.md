@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3 - 2026-06-04
+
+- Add daemon idle shutdown after all peers disconnect, preventing orphaned background daemons.
+- Guard IPC message and write-buffer sizes to protect daemon memory usage.
+- Add the `/oc-live` TUI command to show the current opencode-live daemon PID.
+- Expose the TUI plugin target through package exports so `opencode plugin opencode-live --global` installs both server and TUI entries.
+- Remove the package root server entrypoint and document manual TUI installation.
+
 ## 0.1.2 - 2026-06-03
 
 - Add support for syncing desktop app sessions with TUI and web clients.
