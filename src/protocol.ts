@@ -86,6 +86,22 @@ export class ProtocolMessageDecodeError extends Schema.TaggedErrorClass<Protocol
   },
 ) {}
 
+export class ProtocolMessageTooLarge extends Schema.TaggedErrorClass<ProtocolMessageTooLarge>()(
+  "ProtocolMessageTooLarge",
+  {
+    direction: Schema.Literals(["client", "server"]),
+    maxBytes: Schema.Number,
+  },
+) {
+  override get message() {
+    return `IPC ${this.direction} message exceeded ${this.maxBytes} bytes`;
+  }
+}
+
+export type ProtocolError =
+  | ProtocolMessageDecodeError
+  | ProtocolMessageTooLarge;
+
 export type AllowedEventType = Schema.Schema.Type<
   typeof AllowedEventTypeSchema
 >;

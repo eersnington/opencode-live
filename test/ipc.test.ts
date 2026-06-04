@@ -13,6 +13,92 @@ const dbHash = Schema.decodeUnknownSync(DbHashSchema)(
 const firstProcessID = Schema.decodeUnknownSync(ProcessIDSchema)("proc_1");
 
 describe("ipc", () => {
+  it.live("rejects oversized complete client messages", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() =>
+        fs.mkdtemp(path.join(os.tmpdir(), "opencode-live-ipc-")),
+      ),
+      (dir) =>
+        Effect.gen(function* () {
+          const socketPath = path.join(dir, "daemon.sock");
+          const errors: Array<{ _tag: string; message: string }> = [];
+          const server = createIpcServer({
+            socketPath,
+            maxLineBytes: 16,
+            onClient() {},
+            onClose() {},
+            onError(_client, error) {
+              errors.push(error);
+            },
+            onMessage() {},
+          });
+
+          return yield* Effect.gen(function* () {
+            yield* listen(server, socketPath);
+            const socket = yield* connectRaw(socketPath);
+            socket.write(`${"x".repeat(32)}\n`);
+
+            for (
+              let attempt = 0;
+              attempt < 25 && errors.length === 0;
+              attempt++
+            ) {
+              yield* Effect.sleep("10 millis");
+            }
+
+            assert.strictEqual(errors[0]?._tag, "ProtocolMessageTooLarge");
+            assert.include(errors[0]?.message ?? "", "16 bytes");
+            socket.destroy();
+          }).pipe(Effect.ensuring(Effect.sync(() => server.close())));
+        }),
+      (dir) =>
+        Effect.promise(() => fs.rm(dir, { recursive: true, force: true })),
+    ),
+  );
+
+  it.live("rejects oversized partial client messages", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() =>
+        fs.mkdtemp(path.join(os.tmpdir(), "opencode-live-ipc-")),
+      ),
+      (dir) =>
+        Effect.gen(function* () {
+          const socketPath = path.join(dir, "daemon.sock");
+          const errors: Array<{ _tag: string; message: string }> = [];
+          const server = createIpcServer({
+            socketPath,
+            maxLineBytes: 16,
+            onClient() {},
+            onClose() {},
+            onError(_client, error) {
+              errors.push(error);
+            },
+            onMessage() {},
+          });
+
+          return yield* Effect.gen(function* () {
+            yield* listen(server, socketPath);
+            const socket = yield* connectRaw(socketPath);
+            socket.write("x".repeat(32));
+
+            for (
+              let attempt = 0;
+              attempt < 25 && errors.length === 0;
+              attempt++
+            ) {
+              yield* Effect.sleep("10 millis");
+            }
+
+            assert.strictEqual(errors[0]?._tag, "ProtocolMessageTooLarge");
+            assert.include(errors[0]?.message ?? "", "16 bytes");
+            socket.destroy();
+          }).pipe(Effect.ensuring(Effect.sync(() => server.close())));
+        }),
+      (dir) =>
+        Effect.promise(() => fs.rm(dir, { recursive: true, force: true })),
+    ),
+  );
+
   it.live("reports malformed client messages and keeps the socket usable", () =>
     Effect.acquireUseRelease(
       Effect.promise(() =>
