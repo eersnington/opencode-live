@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { Effect, Schema } from "effect";
+import { DbHashSchema } from "./protocol.js";
 
 export class InMemoryOpencodeDb extends Schema.TaggedErrorClass<InMemoryOpencodeDb>()(
   "InMemoryOpencodeDb",
@@ -15,6 +17,17 @@ export function opencodeDataDir(env: NodeJS.ProcessEnv = process.env) {
     "opencode",
   );
 }
+
+export const resolveOpencodeDbContext = Effect.fn("resolveOpencodeDbContext")(
+  function* (options: Parameters<typeof resolveOpencodeDbPath>[0] = {}) {
+    const dbPath = yield* resolveOpencodeDbPath(options);
+    const dbHash = Schema.decodeUnknownSync(DbHashSchema)(
+      createHash("md5").update(path.resolve(dbPath)).digest("hex"),
+    );
+
+    return { dbPath, dbHash };
+  },
+);
 
 export const resolveOpencodeDbPath = Effect.fn("resolveOpencodeDbPath")(
   function* (

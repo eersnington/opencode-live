@@ -20,11 +20,21 @@ bunx opencode-live install --dry-run
 
 Restart every running opencode instance after install so each process loads the plugin.
 
-### Manual Installation:
+### Manual Installation
+
+If the opencode CLI is unavailable, add the server plugin to `~/.config/opencode/opencode.json`:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-live"]
+}
+```
+
+Add the TUI plugin to `~/.config/opencode/tui.json` so `/oc-live` is available:
+
+```json
+{
   "plugin": ["opencode-live"]
 }
 ```
